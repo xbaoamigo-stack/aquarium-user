@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐠 虛擬魚缸</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+canvas { display: block; width: 100%; height: 100%; }
+
+#ui {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  font-family: 'Helvetica Neue', sans-serif;
+  color: #fff;
+  user-select: none;
+}
+
+#status-bar {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 14px; align-items: center;
+  background: rgba(0,15,30,0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0,200,255,0.15);
+  border-radius: 50px;
+  padding: 9px 22px;
+  font-size: 12px;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+.stat { display: flex; align-items: center; gap: 6px; }
+.stat-label { color: rgba(255,255,255,0.45); font-size: 11px; }
+.bar-wrap { width: 58px; height: 5px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+.bar-hunger { background: linear-gradient(90deg,#ff8800,#ffdd44); }
+.bar-health { background: linear-gradient(90deg,#ff3355,#ff88aa); }
+.bar-water  { background: linear-gradient(90deg,#3399ff,#88ddff); }
+.stat-val { font-size: 11px; min-width: 26px; text-align: right; color: rgba(255,255,255,0.8); }
+.sep { width: 1px; height: 16px; background: rgba(255,255,255,0.1); }
+
+#controls {
+  position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 10px; align-items: center;
+  pointer-events: auto;
+}
+.btn {
+  background: rgba(0,20,45,0.75);
+  border: 1px solid rgba(0,180,255,0.22);
+  border-radius: 25px;
+  color: rgba(200,230,255,0.85);
+  padding: 8px 20px;
+  font-size: 12px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.2s;
+  font-family: inherit;
+}
+.btn:hover { background: rgba(0,60,100,0.8); border-color: rgba(0,200,255,0.5); color: #fff; }
+.btn:active { transform: scale(0.96); }
+#fish-type-label { font-size: 11px; color: rgba(255,255,255,0.35); letter-spacing: 1px; }
+
+#fish-selector {
+  position: absolute; right: 18px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 8px;
+  pointer-events: auto;
+}
+.fish-btn {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: rgba(0,15,30,0.7);
+  border: 1px solid rgba(0,180,255,0.18);
+  cursor: pointer; font-size: 18px;
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  transition: all 0.2s;
+}
+.fish-btn:hover { border-color: rgba(0,200,255,0.6); transform: scale(1.1); }
+.fish-btn.active { border-color: #00d4ff; background: rgba(0,80,130,0.8); }
+
+#toast {
+  position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.72); color: #fff;
+  padding: 8px 22px; border-radius: 22px;
+  font-size: 12px; opacity: 0;
+  transition: opacity 0.35s;
+  pointer-events: none;
+  border: 1px solid rgba(0,200,255,0.2);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  white-space: nowrap;
+}
+
+#info-panel {
+  position: absolute; bottom: 70px; left: 18px;
+  background: rgba(0,10,25,0.72);
+  border: 1px solid rgba(0,180,255,0.15);
+  border-radius: 14px; padding: 10px 16px;
+  font-size: 11px; min-width: 160px;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  pointer-events: none;
+  opacity: 0.8;
+}
+#info-panel .row { display: flex; justify-content: space-between; gap: 14px; margin-bottom: 3px; color: rgba(255,255,255,0.65); }
+#info-panel .row:last-child { margin-bottom: 0; }
+#info-panel .val { color: rgba(255,255,255,0.9); font-weight: 500; }
+
+#hint {
+  position: fixed; bottom: 60px; left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.18);
+  font-size: 11px; pointer-events: none;
+  letter-spacing: 0.5px;
+}
+
+#day-label {
+  position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; color: rgba(255,255,255,0.25);
+  pointer-events: none; letter-spacing: 1px;
+}
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="ui">
+  <div id="status-bar">
+    <div class="stat">
+      <span class="stat-label">🍞</span>
+      <div class="bar-wrap"><div class="bar-fill bar-hunger" id="bar-hunger" style="width:100%"></div></div>
+      <span class="stat-val" id="val-hunger">100</span>
+    </div>
+    <div class="sep"></div>
+    <div class="stat">
+      <span class="stat-label">💚</span>
+      <div class="bar-wrap"><div class="bar-fill bar-health" id="bar-health" style="width:100%"></div></div>
+      <span class="stat-val" id="val-health">100</span>
+    </div>
+    <div class="sep"></div>
+    <div class="stat">
+      <span class="stat-label">💧</span>
+      <div class="bar-wrap"><div class="bar-fill bar-water" id="bar-water" style="width:100%"></div></div>
+      <span class="stat-val" id="val-water">100</span>
+    </div>
+    <div class="sep"></div>
+    <div class="stat">
+      <span class="stat-label">📅</span>
+      <span class="stat-val" id="val-day" style="color:#88ddff">第1天</span>
+    </div>
+    <div class="sep"></div>
+    <div class="stat">
+      <span class="stat-label">📏</span>
+      <span class="stat-val" id="val-size" style="color:#ffcc44">1.0x</span>
+    </div>
+  </div>
+
+  <div id="day-label" id="day-label">☀️ 白天</div>
+
+  <div id="fish-selector">
+    <div class="fish-btn active" data-species="clownfish" title="小丑魚">🐠</div>
+    <div class="fish-btn" data-species="tang" title="倒吊">🐟</div>
+    <div class="fish-btn" data-species="guppy" title="孔雀魚">🐡</div>
+    <div class="fish-btn" data-species="betta" title="鬥魚">🦈</div>
+    <div class="fish-btn" data-species="goldfish" title="金魚">🐠</div>
+  </div>
+
+  <div id="info-panel">
+    <div class="row"><span>魚種</span><span class="val" id="info-species">小丑魚</span></div>
+    <div class="row"><span>速度</span><span class="val" id="info-speed">正常</span></div>
+    <div class="row"><span>狀態</span><span class="val" id="info-state" style="color:#88ff88">健康</span></div>
+    <div class="row"><span>年齡</span><span class="val" id="info-age">0 天</span></div>
+  </div>
+
+  <div id="controls">
+    <button class="btn" id="btn-feed">🍞 餵食</button>
+    <button class="btn" id="btn-water">💧 換水</button>
+    <button class="btn" id="btn-light">💡 光照</button>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<div id="hint">點擊魚缸餵食</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════
+const CFG = {
+  hungerDecay: 0.018,     // per frame
+  healthDecay: 0.003,       // per frame when hunger<20
+  waterDecay: 0.004,       // per frame
+  foodValue: 35,           // hunger restored per food
+  waterBonus: 25,          // water quality restored
+  healthBonus: 12,        // health restored by water change
+  growFrames: 2000,       // frames at 100% health+hunger to grow
+  autoFoodInterval: 800,  // ~13s at 60fps
+};
+
+const SPECIES = {
+  clownfish: { name:'小丑魚', baseColor:[255,136,34], speed:1.0, size:1.0 },
+  tang:       { name:'藍倒吊', baseColor:[68,136,255], speed:1.2, size:1.0 },
+  guppy:      { name:'孔雀魚', baseColor:[255,221,68], speed:1.4, size:0.8 },
+  betta:      { name:'鬥魚',   baseColor:[204,68,255], speed:0.6, size:1.1 },
+  goldfish:   { name:'金魚',   baseColor:[255,170,50], speed:0.9, size:1.2 },
+};
+
+// ═══════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════
+let state = loadState() || makeState();
+
+function makeState() {
+  return {
+    hunger: 80, health: 100, water: 100,
+    size: 1.0, alive: true, age: 0,
+    species: 'clownfish',
+    dayNight: 'day',
+    lightMode: 0, // 0=day 1=dusk 2=night
+    frameCount: 0,
+  };
+}
+
+function loadState() {
+  try {
+    const s = localStorage.getItem('fish_tank_state_v2');
+    if (!s) return null;
+    const p = JSON.parse(s);
+    if (typeof p.hunger !== 'number') return null;
+    return p;
+  } catch { return null; }
+}
+
+function saveState() {
+  try { localStorage.setItem('fish_tank_state_v2', JSON.stringify(state)); } catch {}
+}
+setInterval(saveState, 4000);
+
+// ═══════════════════════════════════════════════
+// CANVAS
+// ═══════════════════════════════════════════════
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ═══════════════════════════════════════════════
+// FISH
+// ═══════════════════════════════════════════════
+class Fish {
+  constructor() {
+    this.x = Math.random() * canvas.width;
+    this.y = 60 + Math.random() * (canvas.height - 160);
+    this.vx = (Math.random() - 0.5) * 2;
+    this.vy = (Math.random() - 0.5) * 2;
+    this.hunger = state.hunger;
+    this.health = state.health;
+    this.size = state.size;
+    this.tail = Math.random() * Math.PI * 2;
+    this.wobble = Math.random() * Math.PI * 2;
+    this.targetFood = null;
+    this.bubbleTimer = Math.random() * 200;
+  }
+
+  get speed() {
+    const sp = SPECIES[state.species].speed;
+    if (this.health < 20) return sp * 0.3;
+    if (this.health < 50) return sp * 0.6;
+    if (this.hunger < 20) return sp * 2.2;
+    if (this.hunger < 40) return sp * 1.5;
+    return sp;
+  }
+
+  update() {
+    this.wobble += 0.05;
+    this.tail += 0.1 + this.speed * 0.04;
+
+    // Random direction change
+    if (Math.random() < 0.008) {
+      this.vx = (Math.random() - 0.5) * this.speed * 2;
+      this.vy = (Math.random() - 0.5) * this.speed;
+    }
+
+    // Find nearest food
+    let nearest = null, minDist = Infinity;
+    foods.forEach(f => {
+      const d = Math.hypot(f.x - this.x, f.y - this.y);
+      if (d < minDist) { minDist = d; nearest = f; }
+    });
+
+    if (nearest && minDist < 300) {
+      const dx = nearest.x - this.x;
+      const dy = nearest.y - this.y;
+      const d = Math.sqrt(dx*dx + dy*dy) || 1;
+      this.vx += (dx / d) * 0.12 * this.speed;
+      this.vy += (dy / d) * 0.12 * this.speed;
+    } else {
+      // Idle wander
+      this.vx += Math.sin(this.wobble) * 0.015 * this.speed;
+      this.vy += Math.cos(this.wobble * 0.7) * 0.01 * this.speed;
+    }
+
+    // Clamp speed
+    const spd = Math.hypot(this.vx, this.vy);
+    if (spd > this.speed * 2.5) {
+      this.vx = this.vx / spd * this.speed * 2.5;
+      this.vy = this.vy / spd * this.speed * 2.5;
+    }
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // Boundary bounce
+    if (this.x < 20) { this.x = 20; this.vx *= -0.8; }
+    if (this.x > canvas.width - 20) { this.x = canvas.width - 20; this.vx *= -0.8; }
+    if (this.y < 60) { this.y = 60; this.vy *= -0.8; }
+    if (this.y > canvas.height - 80) { this.y = canvas.height - 80; this.vy *= -0.8; }
+
+    // Bubble emission
+    this.bubbleTimer++;
+    if (this.bubbleTimer > 150 + Math.random() * 200) {
+      this.bubbleTimer = 0;
+      bubbles.push({
+        x: this.x + (Math.random() - 0.5) * 20,
+        y: this.y,
+        r: 1 + Math.random() * 2.5,
+        speed: 0.2 + Math.random() * 0.35,
+        wobble: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
+  draw() {
+    const sp = SPECIES[state.species];
+    const [br, bg, bb] = sp.baseColor;
+    const alpha = state.alive ? 1 : 0.35;
+    const baseSize = (14 + Math.random() * 6) * this.size;
+    const dir = this.vx >= 0 ? 1 : -1;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(this.x, this.y);
+    ctx.scale(dir, 1);
+
+    // Tail
+    const tw = Math.sin(this.tail) * baseSize * 0.4;
+    ctx.fillStyle = `rgb(${br},${bg},${bb})`;
+    ctx.globalAlpha = alpha * 0.85;
+    ctx.beginPath();
+    ctx.moveTo(-baseSize * 0.5, 0);
+    ctx.lineTo(-baseSize * 1.2, -baseSize * 0.5 + tw);
+    ctx.lineTo(-baseSize * 1.2, baseSize * 0.5 + tw);
+    ctx.fill();
+
+    // Body
+    ctx.globalAlpha = alpha;
+    const hungerT = this.hunger / 100;
+    const healthT = this.health / 100;
+    const r = Math.round(br * (0.4 + hungerT * 0.6));
+    const g = Math.round(bg * (0.4 + hungerT * 0.4) * healthT);
+    const b = Math.round(bb * (0.4 + hungerT * 0.6) * healthT + 20);
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, baseSize * 0.85, baseSize * 0.46, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Stripes
+    if (state.species === 'clownfish') {
+      ctx.fillStyle = `rgba(255,255,255,${0.3 * hungerT})`;
+      for (let s = 0; s < 3; s++) {
+        ctx.beginPath();
+        ctx.ellipse(baseSize * (0.1 - s * 0.32), 0, baseSize * 0.07, baseSize * 0.34, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Dorsal fin
+    ctx.fillStyle = `rgba(${br},${bg},${bb},0.75)`;
+    ctx.beginPath();
+    ctx.moveTo(-baseSize * 0.1, -baseSize * 0.42);
+    ctx.lineTo(baseSize * 0.15, -baseSize * 0.75);
+    ctx.lineTo(baseSize * 0.4, -baseSize * 0.35);
+    ctx.fill();
+
+    // Eye
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(baseSize * 0.38, -baseSize * 0.08, baseSize * 0.11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#1a2030';
+    ctx.beginPath();
+    ctx.arc(baseSize * 0.4, -baseSize * 0.08, baseSize * 0.055, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
+let fish = null; // single fish instance managed externally
+
+// ═══════════════════════════════════════════════
+// FOOD
+// ═══════════════════════════════════════════════
+const foods = [];
+
+function spawnFood(x, y, count = 10) {
+  for (let i = 0; i < count; i++) {
+    foods.push({
+      x: x || Math.random() * (canvas.width - 100) + 50,
+      y: y || 30 + Math.random() * 60,
+      vy: 0.6 + Math.random() * 0.9,
+      vx: (Math.random() - 0.5) * 0.4,
+      r: 2.5 + Math.random() * 2.5,
+      eaten: false,
+      alpha: 1
+    });
+  }
+}
+
+function updateFood() {
+  foods.forEach(f => {
+    if (f.eaten) { f.alpha -= 0.06; return; }
+    f.x += f.vx;
+    f.y += f.vy;
+    // Bounce off bottom
+    if (f.y > canvas.height - 65) {
+      f.vy *= -0.15;
+      f.vx *= 0.7;
+      f.y = canvas.height - 66;
+    }
+    // Collision with fish
+    if (!f.eaten && state.alive && fish) {
+      const dist = Math.hypot(f.x - fish.x, f.y - fish.y);
+      if (dist < 28 * state.size) {
+        f.eaten = true;
+        state.hunger = Math.min(100, state.hunger + CFG.foodValue / 3);
+        showToast('🐠 吃到饲料了！饱食 +' + Math.round(CFG.foodValue / 3));
+      }
+    }
+  });
+  for (let i = foods.length - 1; i >= 0; i--) {
+    if (foods[i].alpha <= 0) foods.splice(i, 1);
+  }
+}
+
+function drawFood() {
+  foods.forEach(f => {
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(220,155,50,${f.alpha})`;
+    ctx.fill();
+  });
+}
+
+// ═══════════════════════════════════════════════
+// BUBBLES
+// ═══════════════════════════════════════════════
+const bubbles = [];
+for (let i = 0; i < 18; i++) {
+  bubbles.push({
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height,
+    r: 1.2 + Math.random() * 2.8,
+    speed: 0.15 + Math.random() * 0.35,
+    wobble: Math.random() * Math.PI * 2
+  });
+}
+
+function updateBubbles() {
+  bubbles.forEach(b => {
+    b.y -= b.speed;
+    b.x += Math.sin(Date.now() * 0.002 + b.wobble) * 0.0006;
+    if (b.y < -10) {
+      b.y = canvas.height + 10;
+      b.x = Math.random() * canvas.width;
+    }
+  });
+}
+
+function drawBubbles() {
+  bubbles.forEach(b => {
+    const bx = b.x, by = b.y;
+    ctx.beginPath();
+    ctx.arc(bx, by, b.r, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(150,220,255,${0.2 + b.r / 12})`;
+    ctx.lineWidth = 1; ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(bx - b.r * 0.3, by - b.r * 0.3, b.r * 0.3, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${0.1 + b.r / 10})`;
+    ctx.fill();
+  });
+}
+
+// ═══════════════════════════════════════════════
+// BACKGROUND
+// ═══════════════════════════════════════════════
+function getBgColors() {
+  const modes = [
+    { bg:['#000d1a','#001830','#002040'], rays:0.06, sand:'#c8b090', tint:'rgba(0,50,120,0.25)', label:'☀️ 白天' },
+    { bg:['#1a0805','#200d08','#2a1208'], rays:0.04, sand:'#a08060', tint:'rgba(80,35,15,0.4)',  label:'🌅 黃昏' },
+    { bg:['#000408','#000612','#000818'], rays:0.015, sand:'#708080', tint:'rgba(0,20,50,0.7)',   label:'🌙 夜晚' },
+  ];
+  return modes[state.lightMode];
+}
+
+function drawBg(t) {
+  const c = getBgColors();
+  const w = canvas.width, h = canvas.height;
+
+  // Gradient bg
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, c.bg[0]); g.addColorStop(0.5, c.bg[1]); g.addColorStop(1, c.bg[2]);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+
+  // Light rays
+  ctx.save();
+  for (let i = 0; i < 7; i++) {
+    const rx = w * (i / 7) + w / 14 + Math.sin(t * 0.00025 + i) * 25;
+    const rg = ctx.createLinearGradient(rx, 0, rx + 70, h);
+    rg.addColorStop(0, `rgba(100,200,255,${c.rays})`);
+    rg.addColorStop(1, `rgba(30,120,200,0)`);
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    ctx.moveTo(rx - 20, 0); ctx.lineTo(rx + 30, 0);
+    ctx.lineTo(rx + 80, h); ctx.lineTo(rx - 10, h);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Water tint
+  ctx.fillStyle = c.tint; ctx.fillRect(0, 0, w, h);
+
+  // Sand
+  const sy = h - 55;
+  const sg = ctx.createLinearGradient(0, sy, 0, h);
+  sg.addColorStop(0, c.sand); sg.addColorStop(1, '#6a5040');
+  ctx.fillStyle = sg;
+  ctx.beginPath(); ctx.moveTo(0, sy);
+  for (let x = 0; x <= w; x += 5) ctx.lineTo(x, sy + Math.sin(x * 0.03) * 3 + Math.sin(x * 0.07) * 2);
+  ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.fill();
+
+  // Rocks
+  const rocks = [
+    {x:0.06,r:48},{x:0.14,r:32},{x:0.22,r:56},{x:0.3,r:26},
+    {x:0.7,r:52},{x:0.8,r:40},{x:0.88,r:30},{x:0.94,r:24},
+    {x:0.5,r:44},{x:0.43,r:22},{x:0.57,r:20}
+  ];
+  rocks.forEach(r => {
+    const rx = r.x * w, ry = sy + 3;
+    const rg = ctx.createRadialGradient(rx - r.r*0.3, ry - r.r*0.3, 0, rx, ry, r.r*0.7);
+    rg.addColorStop(0, '#7a6a5a'); rg.addColorStop(1, '#3a3030');
+    ctx.fillStyle = rg;
+    ctx.beginPath(); ctx.ellipse(rx, ry, r.r, r.r*0.6, 0, 0, Math.PI*2); ctx.fill();
+  });
+
+  // Plants
+  const plants = [
+    {x:0.1,h:65,c:'#2a8844'},{x:0.18,h:50,c:'#33aa55'},
+    {x:0.82,h:70,c:'#227755'},{x:0.9,h:52,c:'#2a9955'},
+    {x:0.5,h:60,c:'#338844'},{x:0.38,h:45,c:'#44aa66'}
+  ];
+  plants.forEach((p, i) => {
+    const px = p.x * w;
+    ctx.strokeStyle = p.c; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(px, sy);
+    ctx.bezierCurveTo(
+      px + Math.sin(t * 0.001 + i) * 8, sy - p.h * 0.5,
+      px + Math.sin(t * 0.0015 + i + 1) * 10, sy - p.h * 0.8,
+      px + Math.sin(t * 0.001 + i) * 12, sy - p.h
+    );
+    ctx.stroke();
+  });
+
+  // Corals
+  const corals = [
+    {x:0.08,y:sy,h:52,c:'#ff5577'},{x:0.18,y:sy,h:40,c:'#ff3366'},
+    {x:0.75,y:sy,h:58,c:'#ff6688'},{x:0.85,y:sy,h:46,c:'#ff4477'},
+    {x:0.5,y:sy,h:36,c:'#ff2255'},
+  ];
+  corals.forEach((c, i) => {
+    const cx = c.x * w;
+    ctx.strokeStyle = c.c; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx, c.y);
+    ctx.bezierCurveTo(
+      cx + Math.sin(t * 0.001 + i) * 8, c.y - c.h * 0.5,
+      cx + Math.sin(t * 0.0015 + i + 1) * 12, c.y - c.h * 0.8,
+      cx + Math.sin(t * 0.001 + i) * 10, c.y - c.h
+    );
+    ctx.stroke();
+  });
+
+  // Anemones
+  const anis = [
+    {x:0.15,y:sy,r:22,c:'#ff88aa'},{x:0.5,y:sy,r:28,c:'#ff99bb'},{x:0.85,y:sy,r:18,c:'#ee88dd'}
+  ];
+  anis.forEach((a, i) => {
+    const ax = a.x * w, ay = a.y;
+    ctx.fillStyle = a.c;
+    ctx.beginPath(); ctx.ellipse(ax, ay, a.r, a.r*0.5, 0, 0, Math.PI*2); ctx.fill();
+    for (let j = 0; j < 12; j++) {
+      const angle = (j / 12) * Math.PI * 2;
+      const sway = Math.sin(t * 0.002 + i + j * 0.5) * 8;
+      ctx.strokeStyle = a.c; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(ax, ay);
+      ctx.quadraticCurveTo(
+        ax + Math.cos(angle) * a.r*0.5 + sway, ay + Math.sin(angle) * a.r*0.3 - 8,
+        ax + Math.cos(angle) * a.r + sway, ay + Math.sin(angle) * a.r*0.5 - 4
+      );
+      ctx.stroke();
+    }
+  });
+
+  // Surface ripple
+  const sy2 = 55;
+  ctx.fillStyle = 'rgba(0,80,160,0.1)';
+  ctx.beginPath(); ctx.moveTo(0, sy2);
+  for (let x = 0; x <= w; x += 4) ctx.lineTo(x, sy2 + Math.sin(x * 0.02 + t * 0.001) * 5 + Math.sin(x * 0.035 + t * 0.0007) * 3);
+  ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.fill();
+}
+
+// ═══════════════════════════════════════════════
+// STATS UPDATE
+// ═══════════════════════════════════════════════
+let lastTime = Date.now();
+let uiTick = 0;
+let growAccum = 0;
+let autoFoodTick = 0;
+
+function updateStats() {
+  const now = Date.now();
+  const dt = Math.min((now - lastTime) / 16.67, 3);
+  lastTime = now;
+  state.frameCount++;
+
+  if (!state.alive) return;
+
+  // Decay
+  state.hunger = Math.max(0, state.hunger - CFG.hungerDecay * dt);
+  if (state.hunger < 20) state.health = Math.max(0, state.health - CFG.healthDecay * dt);
+  state.water = Math.max(0, state.water - CFG.waterDecay * dt);
+  if (state.water < 30) state.health = Math.max(0, state.health - CFG.healthDecay * 0.5 * dt);
+
+  // Growth
+  if (state.health > 90 && state.hunger > 70) {
+    growAccum += dt;
+    if (growAccum > CFG.growFrames) {
+      growAccum = 0;
+      state.size = Math.min(state.size + 0.1, 2.5);
+      showToast('🐠 长大了一點！體型 ' + state.size.toFixed(1) + 'x');
+    }
+  } else {
+    growAccum = Math.max(0, growAccum - dt * 0.5);
+  }
+
+  // Death
+  if (state.health <= 0 && state.alive) {
+    state.alive = false;
+    showToast('💔 鱼儿离去了... 按「餵食」救活');
+  }
+
+  // Auto-food
+  autoFoodTick++;
+  if (autoFoodTick > CFG.autoFoodInterval && state.alive) {
+    autoFoodTick = 0;
+    if (state.hunger < 70) {
+      spawnFood(null, null, 7);
+    }
+  }
+
+  // Day/night cycle every 60s
+  if (state.frameCount % 3600 === 0) {
+    state.lightMode = (state.lightMode + 1) % 3;
+    const labels = ['☀️ 白天','🌅 黃昏','🌙 夜晚'];
+    document.getElementById('day-label').textContent = labels[state.lightMode];
+  }
+
+  // Age
+  if (state.frameCount % 3600 === 0) state.age++;
+
+  // UI update every 20 frames
+  if (uiTick++ > 20) {
+    uiTick = 0;
+    document.getElementById('bar-hunger').style.width = state.hunger + '%';
+    document.getElementById('val-hunger').textContent = Math.round(state.hunger);
+    document.getElementById('bar-health').style.width = state.health + '%';
+    document.getElementById('val-health').textContent = Math.round(state.health);
+    document.getElementById('bar-water').style.width = state.water +    document.getElementById('bar-water').style.width = state.water + '%';
+    document.getElementById('val-water').textContent = Math.round(state.water);
+    document.getElementById('val-day').textContent = '第' + state.age + '天';
+    document.getElementById('val-size').textContent = state.size.toFixed(1) + 'x';
+    document.getElementById('info-species').textContent = SPECIES[state.species].name;
+    const spd = fish ? fish.speed : 0;
+    const spLabel = spd < 0.5 ? '緩慢' : spd > 1.8 ? '慌亂' : '正常';
+    document.getElementById('info-speed').textContent = spLabel;
+    const healthT = state.health;
+    const stateLabel = healthT < 20 ? '虛弱' : healthT < 50 ? '一般' : '健康';
+    const stateColor = healthT < 20 ? '#ff4444' : healthT < 50 ? '#ffdd44' : '#88ff88';
+    const el = document.getElementById('info-state');
+    el.textContent = stateLabel;
+    el.style.color = stateColor;
+    document.getElementById('info-age').textContent = state.age + ' 天';
+  }
+}
+
+// Toast
+let toastTimer;
+function showToast(msg, dur = 3000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.opacity = 1;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.opacity = 0; }, dur);
+}
+
+// Init fish
+fish = new Fish();
+
+// EVENT LISTENERS
+document.getElementById('btn-feed').addEventListener('click', () => {
+  if (!state.alive) {
+    state.alive = true;
+    state.health = 60;
+    state.hunger = 80;
+    fish = new Fish();
+    showToast('🐠 奇蹟康復！');
+    return;
+  }
+  spawnFood();
+  showToast('🍞 已投餵！');
+});
+
+document.getElementById('btn-water').addEventListener('click', () => {
+  state.water = Math.min(100, state.water + CFG.waterBonus);
+  state.health = Math.min(100, state.health + CFG.healthBonus);
+  showToast('💧 已換水！水質 +25，健康 +12');
+});
+
+let lightIdx = 0;
+document.getElementById('btn-light').addEventListener('click', () => {
+  lightIdx = (lightIdx + 1) % 3;
+  state.lightMode = lightIdx;
+  const labels = ['☀️ 白天','🌅 黃昏','🌙 夜晚'];
+  document.getElementById('day-label').textContent = labels[lightIdx];
+  showToast(labels[lightIdx]);
+});
+
+// Fish selector
+document.querySelectorAll('.fish-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.fish-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const newSpecies = btn.dataset.species;
+    state.species = newSpecies;
+    showToast('切換為：' + SPECIES[newSpecies].name);
+    saveState();
+  });
+});
+
+// Canvas click → feed
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  if (state.alive) spawnFood(cx, cy);
+});
+
+// MAIN LOOP
+function loop(t) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawBg(t);
+  updateBubbles(); drawBubbles();
+  updateStats();
+  if (fish) { fish.update(); fish.draw(); }
+  updateFood(); drawFood();
+  requestAnimationFrame(loop);
+}
+
+// START
+showToast('🐠 魚缸系統已啟動！', 3500);
+loop(0);
+
+// Save on exit
+window.addEventListener('beforeunload', saveState);
