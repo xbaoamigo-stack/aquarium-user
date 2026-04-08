@@ -12,7 +12,7 @@
 body {
   margin: 0;
   overflow: hidden;
-  background: #001f3f;
+  background: linear-gradient(#001f3f, #003366);
   font-family: sans-serif;
 }
 
@@ -26,9 +26,10 @@ body {
 
 button {
   padding: 10px 16px;
+  margin-right: 10px;
   border-radius: 10px;
   border: none;
-  background: rgba(255,255,255,0.85);
+  background: rgba(255,255,255,0.9);
   font-size: 14px;
   cursor: pointer;
 }
@@ -39,14 +40,14 @@ button {
   left: 20px;
   color: white;
   font-size: 13px;
-  line-height: 1.6;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  line-height: 1.8;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);
 }
 </style>
 </head>
 <body>
 
-<canvas></canvas>
+<canvas id="canvas"></canvas>
 
 <div id="ui">
   <button id="feed">餵食</button>
@@ -58,7 +59,7 @@ button {
 <script>
 window.onload = function() {
 
-  const canvas = document.querySelector("canvas");
+  const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d");
 
   canvas.width = window.innerWidth;
@@ -116,23 +117,33 @@ window.onload = function() {
   // 🍞 食物
   let foods = [];
 
-  canvas.addEventListener("click", (e) => {
+  canvas.addEventListener("click", function(e) {
     foods.push({ x: e.clientX, y: 0 });
   });
 
   // 🎮 UI
-  document.getElementById("feed").onclick = () => {
+  document.getElementById("feed").onclick = function() {
     gameState.fishes.forEach(f => f.hunger += 20);
   };
 
-  document.getElementById("clean").onclick = () => {
+  document.getElementById("clean").onclick = function() {
     gameState.waterQuality = 100;
   };
 
   // 🔁 主迴圈
   function animate() {
     requestAnimationFrame(animate);
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 🌙 日夜變化
+    let time = Date.now() * 0.00005;
+    let brightness = 20 + Math.sin(time) * 10;
+    document.body.style.background =
+      `linear-gradient(rgb(0, ${Math.round(31 + brightness)}, rgb(${Math.round(63 + brightness * 2)}), rgb(${Math.round(102 + brightness * 2)}))`;
+    // 簡化版漸層背景
+    document.body.style.background =
+      `linear-gradient(rgb(0, ${Math.round(20 + brightness)}), rgb(${Math.round(31 + brightness)}), rgb(${Math.round(51 + brightness * 2)}))`;
 
     // 水質下降
     gameState.waterQuality -= 0.002;
@@ -147,7 +158,7 @@ window.onload = function() {
       ctx.fill();
     });
 
-    // 魚
+    // 🐟 魚
     gameState.fishes.forEach(f => {
 
       f.hunger -= 0.02;
@@ -174,6 +185,7 @@ window.onload = function() {
       if (f.x < 0 || f.x > canvas.width) f.vx *= -1;
       if (f.y < 0 || f.y > canvas.height) f.vy *= -1;
 
+      // 吃食物
       foods = foods.filter(food => {
         let dx = f.x - food.x;
         let dy = f.y - food.y;
@@ -186,15 +198,15 @@ window.onload = function() {
         return true;
       });
 
-      // 🎨 畫魚（顏色隨飽食變化）
-      const hue = f.hunger * 1.2;
+      // 🎨 顏色＝情緒（健康差變暗）
+      let light = f.health < 50 ? 30 : 50;
       ctx.beginPath();
       ctx.arc(f.x, f.y, 6, 0, Math.PI * 2);
-      ctx.fillStyle = `hsl(${hue}, 70%, 50%)`;
+      ctx.fillStyle = `hsl(${f.hunger * 1.2}, 70%, ${light}%)`;
       ctx.fill();
     });
 
-    // UI 顯示
+    // 狀態顯示
     document.getElementById("status").innerHTML =
       "水質: " + gameState.waterQuality.toFixed(0) + "<br>" +
       "魚數: " + gameState.fishes.length;
