@@ -7,224 +7,537 @@
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#001f3f">
 <link rel="apple-touch-icon" href="icon.png">
-
 <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   margin: 0;
   overflow: hidden;
-  background: linear-gradient(#001f3f, #003366);
+  background: #000d1a;
   font-family: sans-serif;
 }
-
 #ui {
   position: fixed;
   bottom: 20px;
   left: 20px;
   display: flex;
   gap: 10px;
+  z-index: 10;
 }
-
 button {
-  padding: 10px 16px;
-  margin-right: 10px;
-  border-radius: 10px;
+  padding: 10px 18px;
+  border-radius: 12px;
   border: none;
   background: rgba(255,255,255,0.9);
   font-size: 14px;
   cursor: pointer;
+  transition: transform 0.1s, background 0.2s;
 }
-
+button:hover { background: rgba(255,255,255,1); transform: scale(1.05); }
+button:active { transform: scale(0.95); }
 #status {
   position: fixed;
   top: 20px;
   left: 20px;
-  color: white;
+  color: rgba(255,255,255,0.9);
   font-size: 13px;
-  line-height: 1.8;
-  text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  line-height: 2;
+  text-shadow: 0 0 10px rgba(0,0,0,0.8);
+  z-index: 10;
+  pointer-events: none;
+}
+#canvas {
+  display: block;
+  position: fixed;
+  top: 0; left: 0;
 }
 </style>
 </head>
 <body>
-
 <canvas id="canvas"></canvas>
-
 <div id="ui">
-  <button id="feed">餵食</button>
-  <button id="clean">換水</button>
+  <button id="feed">🐟 餵食</button>
+  <button id="clean">💧 換水</button>
 </div>
-
 <div id="status"></div>
 
 <script>
 window.onload = function() {
 
-  const canvas = document.getElementById("canvas");
-  const ctx = canvas.getContext("2d");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
 
+function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", resize);
 
-  // 🌊 系統
-  const gameState = {
-    fishes: [],
-    waterQuality: 100,
-    lastUpdate: Date.now()
-  };
+// ── GAME STATE ──────────────────────────────────
+const state = {
+  fishes: [],
+  foods: [],
+  particles: [],   // 裝飾粒子
+  bubbles: [],    // 氣泡
+  sparkles: [],    // 水面光斑
+  foodTime: 0,
+  lastUpdate: Date.now()
+};
 
-  // 🐟 建魚
-  function createFish() {
-    return {
-      id: Date.now() + Math.random(),
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      vx: Math.random() * 2 - 1,
-      vy: Math.random() * 2 - 1,
-      hunger: 100,
-      health: 100
-    };
+// ── FISH CLASS ────────────────────────────────────
+class Fish {
+  constructor(x, y) {
+    this.x = x || Math.random() * canvas.width;
+    this.y = y || Math.random() * canvas.height;
+    this.vx = (Math.random() - 0.5) * 2;
+    this.vy = (Math.random() - 0.5) * 2;
+    this.hunger = 100;
+    this.health = 100;
+    this.size = 6;
+    this.tailPhase = Math.random() * Math.PI * 2;
+    this.wobble = Math.random() * Math.PI * 2;
+    this.hue = Math.random() * 360;
+    this.speedMod = 1;
+    this.target = null;
+    this.id = Math.random();
   }
 
-  // 💾 存檔
-  function saveGame() {
-    localStorage.setItem("aquariumSave", JSON.stringify(gameState));
-  }
+  update() {
+    this.wobble += 0.06;
+    this.tailPhase += 0.12 * this.speedMod;
 
-  // 📂 讀檔
-  function loadGame() {
-    const data = localStorage.getItem("aquariumSave");
-    if (data) {
-      Object.assign(gameState, JSON.parse(data));
-    } else {
-      for (let i = 0; i < 6; i++) {
-        gameState.fishes.push(createFish());
-      }
-    }
-  }
+    // 飽食/健康影響速度
+    if (this.hunger < 20) this.speedMod = 2.2;
+    else if (this.hunger < 40) this.speedMod = 1.5;
+    else this.speedMod = 1;
 
-  // ⏳ 離線進度
-  function applyOffline() {
-    const now = Date.now();
-    const diff = (now - gameState.lastUpdate) / 1000;
-    gameState.fishes.forEach(f => {
-      f.hunger -= diff * 0.01;
-      f.health -= diff * 0.005;
+    if (this.health < 50) this.speedMod *= 0.5;
+    if (this.health < 20) this.speedMod *= 0.4;
+
+    // 找食物
+    let nearest = null, minD = Infinity;
+    state.foods.forEach(f => {
+      const d = Math.hypot(f.x - this.x, f.y - this.y);
+      if (d < minD) { minD = d; nearest = f; }
     });
-    gameState.waterQuality -= diff * 0.002;
-    gameState.lastUpdate = now;
+
+    if (nearest && minD < 350) {
+      const dx = nearest.x - this.x;
+      const dy = nearest.y - this.y;
+      const d = Math.hypot(dx, dy) || 1;
+      this.vx += (dx / d) * 0.08 * this.speedMod;
+      this.vy += (dy / d) * 0.08 * this.speedMod;
+    } else {
+      // 隨機游動
+      this.vx += (Math.random() - 0.5) * 0.15 * this.speedMod;
+      this.vy += (Math.random() - 0.5) * 0.1 * this.speedMod;
+    }
+
+    // 限制速度
+    const sp = Math.hypot(this.vx, this.vy);
+    const maxSp = 3 * this.speedMod;
+    if (sp > maxSp) { this.vx = this.vx/sp*maxSp; this.vy = this.vy/sp*maxSp; }
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // 彈牆
+    const m = 25;
+    if (this.x < m) { this.x = m; this.vx *= -0.8; }
+    if (this.x > canvas.width - m) { this.x = canvas.width - m; this.vx *= -0.8; }
+    if (this.y < m) { this.y = m; this.vy *= -0.8; }
+    if (this.y > canvas.height - m) { this.y = canvas.height - m; this.vy *= -0.8; }
+
+    // 吐出氣泡
+    if (Math.random() < 0.008) {
+      state.bubbles.push({
+        x: this.x + (Math.random()-0.5)*10,
+        y: this.y,
+        r: 1.5 + Math.random()*3,
+        speed: 0.3 + Math.random()*0.5,
+        wobble: Math.random()*Math.PI*2,
+        alpha: 0.7
+      });
+    }
+
+    // 吃食物
+    state.foods = state.foods.filter(f => {
+      if (Math.hypot(f.x - this.x, f.y - this.y) < 14) {
+        this.hunger = Math.min(100, this.hunger + 40);
+        // 吃到的閃光特效
+        for(let i=0;i<6;i++) {
+          state.sparkles.push({
+            x: this.x, y: this.y,
+            vx: (Math.random()-0.5)*4,
+            vy: (Math.random()-0.5)*4,
+            r: 2+Math.random()*3,
+            life: 1
+          });
+        }
+        return false;
+      }
+      return true;
+    });
   }
 
-  // 🍞 食物
-  let foods = [];
+  draw() {
+    const dir = this.vx >= 0 ? 1 : -1;
+    const tail = Math.sin(this.tailPhase) * 8;
+    const light = this.health < 30 ? 25 : this.health < 60 ? 40 : 55;
+    const alpha = this.health < 10 ? 0.4 : 1;
 
-  canvas.addEventListener("click", function(e) {
-    foods.push({ x: e.clientX, y: 0 });
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(this.x, this.y);
+    ctx.scale(dir, 1);
+
+    // 魚身陰影（立體感）
+    ctx.beginPath();
+    ctx.ellipse(2, 3, this.size, this.size*0.55, 0, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fill();
+
+    // 尾鰭
+    ctx.beginPath();
+    ctx.moveTo(-this.size*0.5, 0);
+    ctx.lineTo(-this.size*1.6, -this.size*0.6 + tail);
+    ctx.lineTo(-this.size*1.6, this.size*0.6 + tail);
+    ctx.closePath();
+    ctx.fillStyle = `hsl(${this.hue},75%,${light+5}%)`;
+    ctx.fill();
+
+    // 魚身本體
+    ctx.beginPath();
+    ctx.ellipse(0, 0, this.size, this.size*0.6, 0, 0, Math.PI*2);
+    ctx.fillStyle = `hsl(${this.hue},70%,${light}%)`;
+    ctx.fill();
+
+    // 魚身光澤
+    ctx.beginPath();
+    ctx.ellipse(-this.size*0.1, -this.size*0.2, this.size*0.5, this.size*0.2, -0.3, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(255,255,255,0.15)`;
+    ctx.fill();
+
+    // 背鰭
+    ctx.beginPath();
+    ctx.moveTo(-this.size*0.1, -this.size*0.55);
+    ctx.lineTo(this.size*0.15, -this.size*1.1);
+    ctx.lineTo(this.size*0.4, -this.size*0.5);
+    ctx.closePath();
+    ctx.fillStyle = `hsl(${this.hue},80%,${light}%)`;
+    ctx.fill();
+
+    // 眼睛
+    ctx.beginPath();
+    ctx.arc(this.size*0.55, -this.size*0.1, this.size*0.2, 0, Math.PI*2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(this.size*0.58, -this.size*0.1, this.size*0.1, 0, Math.PI*2);
+    ctx.fillStyle = '#1a2030';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(this.size*0.6, -this.size*0.13, this.size*0.04, 0, Math.PI*2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
+// ── PARTICLES (沙/浮游) ────────────────────────────
+for (let i = 0; i < 40; i++) {
+  state.particles.push({
+    x: Math.random() * 100,
+    y: Math.random() * 100,
+    r: 0.5 + Math.random() * 2,
+    speed: 0.02 + Math.random() * 0.04,
+    wobble: Math.random() * Math.PI * 2,
+    alpha: 0.1 + Math.random() * 0.3
+  });
+}
+
+// ── SPARKLES ──────────────────────────────────────
+function updateSparkles() {
+  state.sparkles = state.sparkles.filter(s => {
+    s.x += s.vx; s.y += s.vy;
+    s.vx *= 0.95; s.vy *= 0.95;
+    s.life -= 0.04;
+    if (s.life <= 0) return false;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r * s.life, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(255,255,200,${s.life})`;
+    ctx.fill();
+    return true;
+  });
+}
+
+// ── BUBBLES ──────────────────────────────────────
+function updateBubbles() {
+  state.bubbles = state.bubbles.filter(b => {
+    b.y -= b.speed;
+    b.x += Math.sin(Date.now()*0.003 + b.wobble) * 0.3;
+    b.alpha -= 0.003;
+    if (b.y < -10 || b.alpha <= 0) return false;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+    ctx.strokeStyle = `rgba(150,220,255,${b.alpha})`;
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(b.x - b.r*0.3, b.y - b.r*0.3, b.r*0.3, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(255,255,255,${b.alpha*0.4})`;
+    ctx.fill();
+    return true;
+  });
+  // 隨機補充
+  if (state.bubbles.length < 20 && Math.random() < 0.03) {
+    state.bubbles.push({
+      x: Math.random() * canvas.width,
+      y: canvas.height - 30,
+      r: 1 + Math.random() * 4,
+      speed: 0.2 + Math.random() * 0.5,
+      wobble: Math.random() * Math.PI * 2,
+      alpha: 0.5 + Math.random() * 0.3
+    });
+  }
+}
+
+// ── BACKGROUND ───────────────────────────────────
+function drawBg(t) {
+  const w = canvas.width, h = canvas.height;
+
+  // 日夜週期
+  const timeCycle = Math.sin(Date.now() * 0.00005);
+  const brightness = Math.round(20 + timeCycle * 15);
+
+  // 背景漸層
+  const bg = ctx.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, `rgb(0,${15+brightness},${30+brightness})`);
+  bg.addColorStop(0.5, `rgb(0,${25+brightness},${50+brightness})`);
+  bg.addColorStop(1, `rgb(0,${10+brightness},${30+brightness})`);
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+
+  // 光線（caustics）
+  ctx.save();
+  for (let i = 0; i < 9; i++) {
+    const rx = w * (i/9) + w/18 + Math.sin(t*0.0002+i)*30;
+    const rg = ctx.createLinearGradient(rx, 0, rx+80, h);
+    rg.addColorStop(0, `rgba(100,200,255,${(brightness/255)*0.07})`);
+    rg.addColorStop(1, `rgba(30,120,200,0)`);
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    ctx.moveTo(rx-25, 0); ctx.lineTo(rx+35, 0);
+    ctx.lineTo(rx+100, h); ctx.lineTo(rx-10, h);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // 沙底
+  const sy = h - 40;
+  const sg = ctx.createLinearGradient(0, sy, 0, h);
+  sg.addColorStop(0, '#c8a060');
+  sg.addColorStop(1, '#7a6040');
+  ctx.fillStyle = sg;
+  ctx.beginPath(); ctx.moveTo(0, sy);
+  for (let x = 0; x <= w; x += 4) {
+    ctx.lineTo(x, sy + Math.sin(x*0.04)*2 + Math.sin(x*0.08)*1);
+  }
+  ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.fill();
+
+  // 石頭
+  const rocks = [
+    {x:0.07,r:35},{x:0.15,r:25},{x:0.25,r:40},{x:0.75,r:38},
+    {x:0.85,r:28},{x:0.92,r:22},{x:0.5,r:30},{x:0.42,r:18}
+  ];
+  rocks.forEach(r => {
+    const rx = r.x*w, ry = sy+3;
+    const rg = ctx.createRadialGradient(rx-r.r*0.3,ry-r.r*0.3,0,rx,ry,r.r*0.7);
+    rg.addColorStop(0,'#7a8a9a'); rg.addColorStop(1,'#3a4a5a');
+    ctx.fillStyle = rg;
+    ctx.beginPath(); ctx.ellipse(rx,ry,r.r,r.r*0.6,0,0,Math.PI*2); ctx.fill();
   });
 
-  // 🎮 UI
-  document.getElementById("feed").onclick = function() {
-    gameState.fishes.forEach(f => f.hunger += 20);
-  };
+  // 水草（貝茲曲線）
+  const plants = [
+    {x:0.08,h:80,c:'#2a8844'},{x:0.16,h:60,c:'#33aa55'},
+    {x:0.84,h:85,c:'#227755'},{x:0.92,h:65,c:'#2a9955'},
+    {x:0.5,h:75,c:'#338844'},{x:0.38,h:55,c:'#44aa66'}
+  ];
+  plants.forEach((p,i) => {
+    const px = p.x*w;
+    ctx.strokeStyle = p.c; ctx.lineWidth=3; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(px, sy);
+    ctx.bezierCurveTo(
+      px+Math.sin(t*0.001+i)*8, sy-p.h*0.5,
+      px+Math.sin(t*0.0015+i+1)*12, sy-p.h*0.8,
+      px+Math.sin(t*0.001+i)*15, sy-p.h
+    );
+    ctx.stroke();
+  });
 
-  document.getElementById("clean").onclick = function() {
-    gameState.waterQuality = 100;
-  };
+  // 珊瑚
+  const corals = [
+    {x:0.1,y:sy,h:55,c:'#ff5577'},{x:0.2,y:sy,h:40,c:'#ff3366'},
+    {x:0.8,y:sy,h:60,c:'#ff6688'},{x:0.88,y:sy,h:45,c:'#ff4477'},
+    {x:0.5,y:sy,h:35,c:'#ff2255'}
+  ];
+  corals.forEach((c,i) => {
+    const cx = c.x*w;
+    ctx.strokeStyle = c.c; ctx.lineWidth=2.5; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(cx, c.y);
+    ctx.bezierCurveTo(
+      cx+Math.sin(t*0.001+i)*8, c.y-c.h*0.5,
+      cx+Math.sin(t*0.0015+i+1)*12, c.y-c.h*0.8,
+      cx+Math.sin(t*0.001+i)*10, c.y-c.h
+    );
+    ctx.stroke();
+  });
 
-  // 🔁 主迴圈
-  function animate() {
-    requestAnimationFrame(animate);
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // 🌙 日夜變化
-    let time = Date.now() * 0.00005;
-    let brightness = 20 + Math.sin(time) * 10;
-    document.body.style.background =
-      `linear-gradient(rgb(0, ${Math.round(31 + brightness)}, rgb(${Math.round(63 + brightness * 2)}), rgb(${Math.round(102 + brightness * 2)}))`;
-    // 簡化版漸層背景
-    document.body.style.background =
-      `linear-gradient(rgb(0, ${Math.round(20 + brightness)}), rgb(${Math.round(31 + brightness)}), rgb(${Math.round(51 + brightness * 2)}))`;
-
-    // 水質下降
-    gameState.waterQuality -= 0.002;
-    if (gameState.waterQuality < 0) gameState.waterQuality = 0;
-
-    // 食物
-    foods.forEach(food => {
-      food.y += 1;
-      ctx.beginPath();
-      ctx.arc(food.x, food.y, 3, 0, Math.PI * 2);
-      ctx.fillStyle = "brown";
-      ctx.fill();
-    });
-
-    // 🐟 魚
-    gameState.fishes.forEach(f => {
-
-      f.hunger -= 0.02;
-      if (f.hunger < 0) f.hunger = 0;
-
-      if (f.hunger < 20 || gameState.waterQuality < 50) {
-        f.health -= 0.02;
-      }
-
-      if (f.health < 0) f.health = 0;
-
-      let speed = f.hunger < 30 ? 2 : 1;
-      if (f.health < 50) speed *= 0.5;
-
-      let target = foods[0];
-      if (target) {
-        f.vx = (target.x - f.x) * 0.01;
-        f.vy = (target.y - f.y) * 0.01;
-      }
-
-      f.x += f.vx * speed;
-      f.y += f.vy * speed;
-
-      if (f.x < 0 || f.x > canvas.width) f.vx *= -1;
-      if (f.y < 0 || f.y > canvas.height) f.vy *= -1;
-
-      // 吃食物
-      foods = foods.filter(food => {
-        let dx = f.x - food.x;
-        let dy = f.y - food.y;
-        let dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist < 10) {
-          f.hunger = Math.min(100, f.hunger + 40);
-          return false;
-        }
-        return true;
-      });
-
-      // 🎨 顏色＝情緒（健康差變暗）
-      let light = f.health < 50 ? 30 : 50;
-      ctx.beginPath();
-      ctx.arc(f.x, f.y, 6, 0, Math.PI * 2);
-      ctx.fillStyle = `hsl(${f.hunger * 1.2}, 70%, ${light}%)`;
-      ctx.fill();
-    });
-
-    // 狀態顯示
-    document.getElementById("status").innerHTML =
-      "水質: " + gameState.waterQuality.toFixed(0) + "<br>" +
-      "魚數: " + gameState.fishes.length;
+  // 水面波紋
+  const sy2 = 30;
+  ctx.fillStyle = 'rgba(0,100,200,0.08)';
+  ctx.beginPath(); ctx.moveTo(0, sy2);
+  for (let x = 0; x <= w; x += 3) {
+    ctx.lineTo(x, sy2 + Math.sin(x*0.03+t*0.001)*4 + Math.sin(x*0.05+t*0.0007)*2);
   }
+  ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.fill();
+}
 
-  // 🚀 啟動
-  loadGame();
-  applyOffline();
-  setInterval(saveGame, 5000);
-  animate();
+// ── PARTICLES RENDER ───────────────────────────────
+function updateParticles() {
+  state.particles.forEach(p => {
+    p.y -= p.speed;
+    p.x += Math.sin(Date.now()*0.001+p.wobble)*0.02;
+    if (p.y < 0) { p.y = 100; p.x = Math.random()*100; }
+    const px = p.x/100*canvas.width;
+    const py = p.y/100*canvas.height;
+    ctx.beginPath();
+    ctx.arc(px, py, p.r, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(200,220,255,${p.alpha})`;
+    ctx.fill();
+  });
+}
 
-  // 📲 Service Worker
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js");
+// ── SAVE / LOAD ───────────────────────────────────
+function save() { localStorage.setItem("aquariumSave", JSON.stringify(state)); }
+function load() {
+  const d = localStorage.getItem("aquariumSave");
+  if (d) {
+    const p = JSON.parse(d);
+    state.fishes = p.fishes || [];
+    state.foods = [];
+    state.waterQuality = p.waterQuality || 100;
+    // 飢餓/健康離線損耗
+    const diff = (Date.now() - (p._last||Date.now())) / 1000;
+    state.fishes.forEach(f => {
+      f.hunger = Math.max(0, (f.hunger||100) - diff*0.01);
+      f.health = Math.max(0, (f.health||100) - diff*0.005);
+    });
+    state._last = Date.now();
+  } else {
+    for (let i = 0; i < 6; i++) state.fishes.push(new Fish());
   }
+}
+load();
+setInterval(save, 5000);
+
+// ── STATS ─────────────────────────────────────────
+let hungerDecayTimer = 0;
+
+function updateStats() {
+  const now = Date.now();
+  state.fishes.forEach(f => {
+    f.hunger = Math.max(0, f.hunger - 0.015);
+    if (f.hunger < 20 || state.waterQuality < 50) {
+      f.health = Math.max(0, f.health - 0.003);
+    }
+    if (f.health <= 0) {
+      // 魚死亡重生
+      setTimeout(() => {
+        const idx = state.fishes.indexOf(f);
+        if (idx > -1) state.fishes.splice(idx, 1);
+        state.fishes.push(new Fish());
+      }, 2000);
+    }
+  });
+
+  state.waterQuality = Math.max(0, state.waterQuality - 0.003);
+
+  // 食物飄落
+  state.foods.forEach(f => {
+    f.y += 0.8;
+    f.x += f.vx || 0;
+    if (f.y > canvas.height - 45) {
+      f.y = canvas.height - 46;
+      f.vy = -0.1;
+      f.vx *= 0.7;
+    }
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, 3, 0, Math.PI*2);
+    ctx.fillStyle = '#d4a030';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(f.x+0.5, f.y+0.5, 3, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,200,50,0.3)';
+    ctx.fill();
+  });
+
+  document.getElementById("status").innerHTML =
+    "💧 水質: " + Math.round(state.waterQuality) +
+    "&nbsp;&nbsp;|&nbsp;&nbsp;🐟 魚數: " + state.fishes.length +
+    "<br>平均健康: " + Math.round(state.fishes.reduce((a,f)=>a+f.health,0)/(state.fishes.length||1)) + "%" +
+    "&nbsp;&nbsp;|&nbsp;&nbsp;平均飽食: " + Math.round(state.fishes.reduce((a,f)=>a+f.hunger,0)/(state.fishes.length||1)) + "%";
+}
+
+// ── BUTTONS ───────────────────────────────────────
+document.getElementById("feed").onclick = function() {
+  for (let i = 0; i < 10; i++) {
+    state.foods.push({
+      x: 50 + Math.random()*(canvas.width-100),
+      y: 20 + Math.random()*30,
+      vy: 0.5
+    });
+  }
+};
+
+document.getElementById("clean").onclick = function() {
+  state.waterQuality = 100;
+  // 換水特效：氣泡爆發
+  for (let i = 0; i < 30; i++) {
+    state.bubbles.push({
+      x: Math.random()*canvas.width,
+      y: canvas.height - 20,
+      r: 2 + Math.random()*5,
+      speed: 1 + Math.random()*2,
+      wobble: Math.random()*Math.PI*2,
+      alpha: 0.8
+    });
+  }
+};
+
+// ── MAIN LOOP ────────────────────────────────────
+function loop(t) {
+  requestAnimationFrame(loop);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  drawBg(t);
+  updateParticles();
+  state.fishes.forEach(f => { f.update(); f.draw(); });
+  updateBubbles();
+  updateSparkles();
+  updateStats();
+}
+
+loop(0);
+
+// ── SW ────────────────────────────────────────────
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js");
+}
 
 };
 </script>
-
 </body>
 </html>
